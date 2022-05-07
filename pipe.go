@@ -6,4 +6,6 @@ type Pipe interface {
 	Len() uint64
 	Break()
 	Done() <-chan struct{}
+	InputChannel() interface{}
+	OutputChannel() interface{}
 }
