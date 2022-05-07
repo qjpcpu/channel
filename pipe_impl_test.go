@@ -171,3 +171,23 @@ func TestDynamicCap(t *testing.T) {
 	case <-time.After(time.Millisecond):
 	}
 }
+
+func TestCloseInputAndWaitDone(t *testing.T) {
+	in, out := make(chan int, 0), make(chan int, 4)
+	pipe := NewBufferedPipe(in, out, 10).(*pipeImpl)
+	defer pipe.Break()
+	for i := 0; i < 10; i++ {
+		in <- i
+	}
+	go func() {
+		for {
+			<-out
+		}
+	}()
+	// stop send
+	close(in)
+	<-pipe.Done()
+	if pipe.queueSize != 0 {
+		t.Fatal("not wait drain out", pipe.queueSize)
+	}
+}

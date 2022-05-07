@@ -52,14 +52,6 @@ func NewBufferedPipe(readC interface{}, writeC interface{}, bufferCap uint64) Pi
 	return j
 }
 
-func (j *pipeImpl) InputChannel() interface{} {
-	return j.readC.Interface()
-}
-
-func (j *pipeImpl) OutputChannel() interface{} {
-	return j.writeC.Interface()
-}
-
 // SetFilter of pipe
 func (j *pipeImpl) SetFilter(f PipeFilter) {
 	j.filter = f
