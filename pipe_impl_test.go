@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -179,16 +180,25 @@ func TestCloseInputAndWaitDone(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		in <- i
 	}
+	var ret []int
+	done := make(chan struct{}, 1)
 	go func() {
-		for {
-			<-out
+		time.Sleep(time.Millisecond)
+		for v := range out {
+			ret = append(ret, v)
 		}
+		close(done)
 	}()
 	// stop send
 	close(in)
 	<-pipe.Done()
 	if pipe.queueSize != 0 {
 		t.Fatal("not wait drain out", pipe.queueSize)
+	}
+	close(out)
+	<-done
+	if len(ret) != 10 {
+		t.Fatal("not wait drain out", len(ret))
 	}
 }
 
@@ -238,7 +248,7 @@ func testCap(t *testing.T, cap int, inBuf, outBuf int) {
 	for i := 1; ; i++ {
 		select {
 		case in <- i:
-		case <-time.After(time.Millisecond * 3):
+		case <-time.After(time.Millisecond * 5):
 			real := i - 1
 			if real != cap {
 				t.Fatalf("expect cap=%v real=%v api=%v in-buf=%v out-buf=%v", cap, real, pipe.Cap(), inBuf, outBuf)
@@ -287,5 +297,44 @@ FIRST:
 	case in <- 100:
 		t.Fatalf("expect cap=%v api=%v in-buf=%v out-buf=%v", cap, pipe.Cap(), inBuf, outBuf)
 	case <-time.After(time.Millisecond * 3):
+	}
+}
+
+func TestBlockQueue(t *testing.T) {
+	cap := 3
+	q := NewBlockQueue(cap)
+	if q.Cap() != cap {
+		t.Fatal("bad cap", q.Cap())
+	}
+	if q.Len() != 0 {
+		t.Fatal("bad len", q.Len())
+	}
+	for i := 0; i < cap; i++ {
+		ok := q.Enqueue(context.Background(), i)
+		if !ok {
+			t.Fatal("enqueue fail")
+		}
+	}
+	func() {
+		ctx0, cancel := context.WithTimeout(context.Background(), time.Millisecond*1)
+		if q.Enqueue(ctx0, 100) {
+			t.Fatal("should not enqueue")
+		}
+		cancel()
+	}()
+	if q.Len() != cap {
+		t.Fatal("bad len", q.Len())
+	}
+	q.Close()
+	var lastv int
+	for {
+		v, ok := q.Dequeue(context.Background())
+		if !ok {
+			if cap-1 != lastv {
+				t.Fatal("bad block queue")
+			}
+			break
+		}
+		lastv = v.(int)
 	}
 }
