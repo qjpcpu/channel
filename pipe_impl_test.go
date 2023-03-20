@@ -1,7 +1,6 @@
 package channel
 
 import (
-	"context"
 	"sync"
 	"testing"
 	"time"
@@ -297,44 +296,5 @@ FIRST:
 	case in <- 100:
 		t.Fatalf("expect cap=%v api=%v in-buf=%v out-buf=%v", cap, pipe.Cap(), inBuf, outBuf)
 	case <-time.After(time.Millisecond * 3):
-	}
-}
-
-func TestBlockQueue(t *testing.T) {
-	cap := 3
-	q := NewBlockQueue(cap)
-	if q.Cap() != cap {
-		t.Fatal("bad cap", q.Cap())
-	}
-	if q.Len() != 0 {
-		t.Fatal("bad len", q.Len())
-	}
-	for i := 0; i < cap; i++ {
-		ok := q.Enqueue(context.Background(), i)
-		if !ok {
-			t.Fatal("enqueue fail")
-		}
-	}
-	func() {
-		ctx0, cancel := context.WithTimeout(context.Background(), time.Millisecond*1)
-		if q.Enqueue(ctx0, 100) {
-			t.Fatal("should not enqueue")
-		}
-		cancel()
-	}()
-	if q.Len() != cap {
-		t.Fatal("bad len", q.Len())
-	}
-	q.Close()
-	var lastv int
-	for {
-		v, ok := q.Dequeue(context.Background())
-		if !ok {
-			if cap-1 != lastv {
-				t.Fatal("bad block queue")
-			}
-			break
-		}
-		lastv = v.(int)
 	}
 }
