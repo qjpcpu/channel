@@ -191,3 +191,101 @@ func TestCloseInputAndWaitDone(t *testing.T) {
 		t.Fatal("not wait drain out", pipe.queueSize)
 	}
 }
+
+func TestCap(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		testCap(t, i, 0, 0)
+
+		testCap(t, i, 0, 1)
+		testCap(t, i, 1, 0)
+		testCap(t, i, 1, 1)
+
+		testCap(t, i, 0, 2)
+		testCap(t, i, 2, 0)
+		testCap(t, i, 2, 2)
+
+		testCap(t, i, 0, 3)
+		testCap(t, i, 3, 0)
+		testCap(t, i, 3, 3)
+	}
+}
+
+func TestUpdateCap(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		testUpdateCap(t, i, 0, 0)
+
+		testUpdateCap(t, i, 0, 1)
+		testUpdateCap(t, i, 1, 0)
+		testUpdateCap(t, i, 1, 1)
+
+		testUpdateCap(t, i, 0, 2)
+		testUpdateCap(t, i, 2, 0)
+		testUpdateCap(t, i, 2, 2)
+
+		testUpdateCap(t, i, 0, 3)
+		testUpdateCap(t, i, 3, 0)
+		testUpdateCap(t, i, 3, 3)
+	}
+}
+
+func testCap(t *testing.T, cap int, inBuf, outBuf int) {
+	if cap < inBuf+outBuf+1 {
+		cap = inBuf + outBuf + 1
+	}
+	in, out := make(chan int, inBuf), make(chan int, outBuf)
+	pipe := NewBufferedPipe(in, out, uint64(cap))
+	defer pipe.Break()
+	for i := 1; ; i++ {
+		select {
+		case in <- i:
+		case <-time.After(time.Millisecond * 3):
+			real := i - 1
+			if real != cap {
+				t.Fatalf("expect cap=%v real=%v api=%v in-buf=%v out-buf=%v", cap, real, pipe.Cap(), inBuf, outBuf)
+			}
+			if real != int(pipe.Cap()) {
+				t.Fatalf("expect cap=%v real=%v api=%v maxin=%v in-buf=%v out-buf=%v", cap, real, pipe.Cap(), pipe.(*pipeImpl).maxIn, inBuf, outBuf)
+			}
+			return
+		}
+	}
+}
+
+func testUpdateCap(t *testing.T, cap int, inBuf, outBuf int) {
+	if cap < inBuf+outBuf+1 {
+		cap = inBuf + outBuf + 1
+	}
+	in, out := make(chan int, inBuf), make(chan int, outBuf)
+	pipe := NewBufferedPipe(in, out, uint64(cap))
+	defer pipe.Break()
+FIRST:
+	for i := 1; ; i++ {
+		select {
+		case in <- i:
+		case <-time.After(time.Millisecond * 3):
+			real := i - 1
+			if real != cap {
+				t.Fatalf("expect cap=%v real=%v api=%v in-buf=%v out-buf=%v", cap, real, pipe.Cap(), inBuf, outBuf)
+			}
+			if real != int(pipe.Cap()) {
+				t.Fatalf("expect cap=%v real=%v api=%v maxin=%v in-buf=%v out-buf=%v", cap, real, pipe.Cap(), pipe.(*pipeImpl).maxIn, inBuf, outBuf)
+			}
+			break FIRST
+		}
+	}
+
+	cap++
+	pipe.SetCap(uint64(cap))
+
+	select {
+	case in <- 100:
+	case <-time.After(time.Millisecond * 3):
+		t.Fatalf("expect cap=%v api=%v in-buf=%v out-buf=%v", cap, pipe.Cap(), inBuf, outBuf)
+	}
+
+	select {
+	case in <- 100:
+		t.Fatalf("expect cap=%v api=%v in-buf=%v out-buf=%v", cap, pipe.Cap(), inBuf, outBuf)
+	case <-time.After(time.Millisecond * 3):
+	}
+}

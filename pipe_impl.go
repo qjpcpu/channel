@@ -32,7 +32,7 @@ func NewPipe(readC interface{}, writeC interface{}) Pipe {
 }
 
 // NewBufferedPipe pipe two channel with cap
-func NewBufferedPipe(readC interface{}, writeC interface{}, bufferCap uint64) Pipe {
+func NewBufferedPipe(readC interface{}, writeC interface{}, cap uint64) Pipe {
 	if readC == nil || writeC == nil {
 		panic("data channel should not be nil")
 	}
@@ -46,8 +46,13 @@ func NewBufferedPipe(readC interface{}, writeC interface{}, bufferCap uint64) Pi
 		breakC:  make(chan struct{}, 1),
 		reloadC: make(chan struct{}, 1),
 		list:    newList(),
-		maxIn:   bufferCap,
 	}
+	chCap := uint64(j.readC.Cap() + j.writeC.Cap())
+	min := chCap + 1
+	if cap < min {
+		cap = min
+	}
+	j.maxIn = cap - chCap
 	go j.transport()
 	return j
 }
