@@ -1,30 +1,49 @@
 package channel
 
 import (
-	"reflect"
 	"sync"
 )
 
-type node struct {
-	val  reflect.Value
-	next *node
+type node[T any] struct {
+	val  T
+	next *node[T]
 }
 
-var (
-	nodes = sync.Pool{New: func() interface{} { return new(node) }}
-)
-
-type linkedList struct {
-	head *node
-	rear *node
+type Pool[T any] struct {
+	p sync.Pool
 }
 
-func newList() *linkedList {
-	return &linkedList{}
+func newPool[T any]() *Pool[T] {
+	return &Pool[T]{
+		p: sync.Pool{
+			New: func() any { return new(node[T]) },
+		},
+	}
 }
 
-func (l *linkedList) push(v reflect.Value) {
-	n := nodes.Get().(*node)
+func (p *Pool[T]) Get() *node[T] {
+	return p.p.Get().(*node[T])
+}
+
+func (p *Pool[T]) Put(x *node[T]) {
+	x.next = nil
+	p.p.Put(x)
+}
+
+type linkedList[T any] struct {
+	pool *Pool[T]
+	head *node[T]
+	rear *node[T]
+}
+
+func newList[T any]() *linkedList[T] {
+	return &linkedList[T]{
+		pool: (*Pool[T])(newPool[T]()),
+	}
+}
+
+func (l *linkedList[T]) push(v T) {
+	n := l.pool.Get()
 	n.val = v
 	n.next = nil
 	if l.rear == nil {
@@ -36,9 +55,9 @@ func (l *linkedList) push(v reflect.Value) {
 	}
 }
 
-func (l *linkedList) pop() (reflect.Value, bool) {
+func (l *linkedList[T]) pop() (ret T, ok bool) {
 	if l.head == nil {
-		return reflect.Value{}, false
+		return
 	} else {
 		n := l.head
 		if l.head == l.rear {
@@ -49,8 +68,9 @@ func (l *linkedList) pop() (reflect.Value, bool) {
 		}
 		val := n.val
 		n.next = nil
-		n.val = reflect.Value{}
-		nodes.Put(n)
+		var zero T
+		n.val = zero
+		l.pool.Put(n)
 		return val, true
 	}
 }
