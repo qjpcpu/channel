@@ -7,6 +7,11 @@ import (
 	"time"
 )
 
+func mustEq(t *testing.T, a, b int64) {
+	if a != b {
+		t.Fatalf("%v != %v", a, b)
+	}
+}
 func TestList(t *testing.T) {
 	list := newList[int]()
 	_, ok := list.pop()
@@ -33,6 +38,7 @@ func TestList(t *testing.T) {
 
 func TestBasic(t *testing.T) {
 	ch := New[int]()
+	mustEq(t, ch.Len(), 0)
 	go func() {
 		for i := 0; i < 5; i++ {
 			ch.In() <- i
@@ -55,6 +61,29 @@ func TestBasic(t *testing.T) {
 	}
 	if len(list) != 5 {
 		t.Fatal(list)
+	}
+}
+
+func TestCap(t *testing.T) {
+	ch := New[int]()
+	ch.SetCap(1)
+	mustEq(t, ch.Len(), 0)
+	ch.In() <- 1
+	mustEq(t, ch.Len(), 1)
+	select {
+	case ch.In() <- 2:
+		t.Fatal("should not in")
+	case <-time.After(time.Second):
+	}
+	mustEq(t, ch.Cap(), 1)
+	mustEq(t, ch.Len(), 1)
+	ch.SetCap(2)
+	ch.In() <- 2
+	mustEq(t, ch.Cap(), 2)
+	mustEq(t, ch.Len(), 2)
+	ch.SetCap(0)
+	for i := 0; i < 10; i++ {
+		ch.In() <- i
 	}
 }
 

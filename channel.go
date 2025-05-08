@@ -1,10 +1,16 @@
 package channel
 
-import "sync"
+import (
+	"sync"
+	"sync/atomic"
+)
 
 type Channel[T any] interface {
 	In() chan<- T
 	Out() <-chan T
+	Len() int64
+	Cap() int64
+	SetCap(int64)
 	/* return when input closed && all data sent to output channel */
 	Done() <-chan struct{}
 	/* close input */
@@ -17,6 +23,7 @@ func New[T any]() Channel[T] {
 	ch := &channel[T]{
 		in:          make(chan T),
 		out:         make(chan T),
+		dummy:       make(chan T),
 		list:        newList[T](),
 		outputClose: make(chan struct{}, 1),
 	}
@@ -25,11 +32,29 @@ func New[T any]() Channel[T] {
 }
 
 type channel[T any] struct {
-	in, out     chan T
-	list        *linkedList[T]
-	inputClosed bool
-	outputClose chan struct{}
-	closeCh     sync.Once
+	capacity, listCount, airCount int64
+	in, out, dummy                chan T
+	list                          *linkedList[T]
+	inputClosed                   bool
+	outputClose                   chan struct{}
+	closeCh                       sync.Once
+}
+
+func (ch *channel[T]) Cap() int64 {
+	return atomic.LoadInt64(&ch.capacity)
+}
+
+func (ch *channel[T]) SetCap(c int64) {
+	var e T
+	select {
+	case ch.dummy <- e:
+	default:
+	}
+	atomic.StoreInt64(&ch.capacity, c)
+}
+
+func (ch *channel[T]) Len() int64 {
+	return atomic.LoadInt64(&ch.listCount) + atomic.LoadInt64(&ch.airCount)
 }
 
 func (ch *channel[T]) In() chan<- T {
@@ -45,7 +70,10 @@ func (ch *channel[T]) Done() <-chan struct{} {
 }
 
 func (ch *channel[T]) Close() {
-	ch.closeCh.Do(func() { close(ch.in) })
+	ch.closeCh.Do(func() {
+		close(ch.in)
+		close(ch.dummy)
+	})
 }
 
 func (ch *channel[T]) Shutdown() {
@@ -60,20 +88,20 @@ func (ch *channel[T]) Shutdown() {
 
 func (ch *channel[T]) transport() {
 	var elem T
-	var elemOnAir bool
 	for {
-		if !elemOnAir {
+		if ch.airCount == 0 {
 			var ok bool
 			if elem, ok = ch.list.pop(); ok {
-				elemOnAir = true
+				ch.listCount--
+				ch.airCount = 1
 			}
 		}
 		if !ch.inputClosed {
-			elemOnAir = ch.transport_when_input(elem, elemOnAir)
+			ch.transport_when_input(elem)
 		} else {
-			if elemOnAir {
+			if ch.airCount == 1 {
 				ch.transport_when_no_input(elem)
-				elemOnAir = false
+				ch.airCount = 0
 			} else {
 				/* well, all data sent done */
 				close(ch.out)
@@ -84,26 +112,40 @@ func (ch *channel[T]) transport() {
 	}
 }
 
-func (ch *channel[T]) transport_when_input(elem T, elemOnAir bool) bool {
-	if elemOnAir {
+func (ch *channel[T]) transport_when_input(elem T) {
+	if ch.capacity > 0 && ch.Len() >= ch.capacity {
+		if ch.airCount == 0 {
+			panic("should not come here, buffer overflows but get nothing from buffer?")
+		}
 		select {
 		case ch.out <- elem:
-			return false
+			ch.airCount = 0
+		case <-ch.dummy:
+		}
+		return
+	}
+	if ch.airCount == 1 {
+		select {
+		case ch.out <- elem:
+			ch.airCount = 0
+			return
 		case val, ok := <-ch.in:
 			if ok {
 				ch.list.push(val)
+				ch.listCount++
 			} else {
 				ch.inputClosed = true
 			}
-			return elemOnAir
+			return
 		}
 	} else {
 		if val, ok := <-ch.in; ok {
 			ch.list.push(val)
+			ch.listCount++
 		} else {
 			ch.inputClosed = true
 		}
-		return elemOnAir
+		return
 	}
 }
 
