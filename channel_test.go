@@ -48,6 +48,11 @@ func TestBasic(t *testing.T) {
 			break
 		}
 	}
+	select {
+	case <-ch.Done():
+	case <-time.After(time.Second * 3):
+		t.Fatal("timeout")
+	}
 	if len(list) != 5 {
 		t.Fatal(list)
 	}

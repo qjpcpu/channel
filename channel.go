@@ -5,6 +5,8 @@ import "sync"
 type Channel[T any] interface {
 	In() chan<- T
 	Out() <-chan T
+	/* return when input closed && all data sent to output channel */
+	Done() <-chan struct{}
 	/* close input */
 	Close()
 	/* close channel and drop data */
@@ -13,9 +15,10 @@ type Channel[T any] interface {
 
 func New[T any]() Channel[T] {
 	ch := &channel[T]{
-		in:   make(chan T),
-		out:  make(chan T),
-		list: newList[T](),
+		in:          make(chan T),
+		out:         make(chan T),
+		list:        newList[T](),
+		outputClose: make(chan struct{}, 1),
 	}
 	go ch.transport()
 	return ch
@@ -25,6 +28,7 @@ type channel[T any] struct {
 	in, out     chan T
 	list        *linkedList[T]
 	inputClosed bool
+	outputClose chan struct{}
 	closeCh     sync.Once
 }
 
@@ -34,6 +38,10 @@ func (ch *channel[T]) In() chan<- T {
 
 func (ch *channel[T]) Out() <-chan T {
 	return ch.out
+}
+
+func (ch *channel[T]) Done() <-chan struct{} {
+	return ch.outputClose
 }
 
 func (ch *channel[T]) Close() {
@@ -69,6 +77,7 @@ func (ch *channel[T]) transport() {
 			} else {
 				/* well, all data sent done */
 				close(ch.out)
+				close(ch.outputClose)
 				return
 			}
 		}
