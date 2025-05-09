@@ -89,19 +89,19 @@ func (ch *channel[T]) Shutdown() {
 func (ch *channel[T]) transport() {
 	var elem T
 	for {
-		if ch.airCount == 0 {
+		if ch.get_airCount() == 0 {
 			var ok bool
 			if elem, ok = ch.list.pop(); ok {
-				ch.listCount--
-				ch.airCount = 1
+				atomic.AddInt64(&ch.listCount, -1)
+				ch.set_airCount(1)
 			}
 		}
 		if !ch.inputClosed {
 			ch.transport_when_input(elem)
 		} else {
-			if ch.airCount == 1 {
+			if ch.get_airCount() == 1 {
 				ch.transport_when_no_input(elem)
-				ch.airCount = 0
+				ch.set_airCount(0)
 			} else {
 				/* well, all data sent done */
 				close(ch.out)
@@ -113,26 +113,26 @@ func (ch *channel[T]) transport() {
 }
 
 func (ch *channel[T]) transport_when_input(elem T) {
-	if ch.capacity > 0 && ch.Len() >= ch.capacity {
-		if ch.airCount == 0 {
+	if capacity := ch.get_cap(); capacity > 0 && ch.Len() >= capacity {
+		if ch.get_airCount() == 0 {
 			panic("should not come here, buffer overflows but get nothing from buffer?")
 		}
 		select {
 		case ch.out <- elem:
-			ch.airCount = 0
+			ch.set_airCount(0)
 		case <-ch.dummy:
 		}
 		return
 	}
-	if ch.airCount == 1 {
+	if ch.get_airCount() == 1 {
 		select {
 		case ch.out <- elem:
-			ch.airCount = 0
+			ch.set_airCount(0)
 			return
 		case val, ok := <-ch.in:
 			if ok {
 				ch.list.push(val)
-				ch.listCount++
+				atomic.AddInt64(&ch.listCount, 1)
 			} else {
 				ch.inputClosed = true
 			}
@@ -141,7 +141,7 @@ func (ch *channel[T]) transport_when_input(elem T) {
 	} else {
 		if val, ok := <-ch.in; ok {
 			ch.list.push(val)
-			ch.listCount++
+			atomic.AddInt64(&ch.listCount, 1)
 		} else {
 			ch.inputClosed = true
 		}
@@ -151,4 +151,20 @@ func (ch *channel[T]) transport_when_input(elem T) {
 
 func (ch *channel[T]) transport_when_no_input(elem T) {
 	ch.out <- elem
+}
+
+func (ch *channel[T]) get_airCount() int64 {
+	return atomic.LoadInt64(&ch.airCount)
+}
+
+func (ch *channel[T]) set_airCount(c int64) {
+	atomic.StoreInt64(&ch.airCount, c)
+}
+
+func (ch *channel[T]) get_cap() int64 {
+	return atomic.LoadInt64(&ch.capacity)
+}
+
+func (ch *channel[T]) set_cap(c int64) {
+	atomic.StoreInt64(&ch.capacity, c)
 }
