@@ -10,7 +10,7 @@ type Channel[T any] interface {
 	Out() <-chan T
 	Len() int64
 	Cap() int64
-	SetCap(int64)
+	SetCap(int64) Channel[T]
 	/* return when input closed && all data sent to output channel */
 	Done() <-chan struct{}
 	/* close input */
@@ -44,13 +44,14 @@ func (ch *channel[T]) Cap() int64 {
 	return atomic.LoadInt64(&ch.capacity)
 }
 
-func (ch *channel[T]) SetCap(c int64) {
+func (ch *channel[T]) SetCap(c int64) Channel[T] {
 	var e T
 	select {
 	case ch.dummy <- e:
 	default:
 	}
 	atomic.StoreInt64(&ch.capacity, c)
+	return ch
 }
 
 func (ch *channel[T]) Len() int64 {
