@@ -23,7 +23,7 @@ func New[T any]() Channel[T] {
 	ch := &channel[T]{
 		in:          make(chan T),
 		out:         make(chan T),
-		dummy:       make(chan T),
+		signal:      make(chan T),
 		list:        newList[T](),
 		outputClose: make(chan struct{}, 1),
 	}
@@ -33,7 +33,7 @@ func New[T any]() Channel[T] {
 
 type channel[T any] struct {
 	capacity, listCount, airCount int64
-	in, out, dummy                chan T
+	in, out, signal               chan T
 	list                          *linkedList[T]
 	inputClosed                   bool
 	outputClose                   chan struct{}
@@ -47,7 +47,7 @@ func (ch *channel[T]) Cap() int64 {
 func (ch *channel[T]) SetCap(c int64) Channel[T] {
 	var e T
 	select {
-	case ch.dummy <- e:
+	case ch.signal <- e:
 	default:
 	}
 	atomic.StoreInt64(&ch.capacity, c)
@@ -73,7 +73,6 @@ func (ch *channel[T]) Done() <-chan struct{} {
 func (ch *channel[T]) Close() {
 	ch.closeCh.Do(func() {
 		close(ch.in)
-		close(ch.dummy)
 	})
 }
 
@@ -107,6 +106,7 @@ func (ch *channel[T]) transport() {
 				/* well, all data sent done */
 				close(ch.out)
 				close(ch.outputClose)
+				close(ch.signal)
 				return
 			}
 		}
@@ -121,7 +121,7 @@ func (ch *channel[T]) transport_when_input(elem T) {
 		select {
 		case ch.out <- elem:
 			ch.set_airCount(0)
-		case <-ch.dummy:
+		case <-ch.signal:
 		}
 		return
 	}
