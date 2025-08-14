@@ -18,6 +18,7 @@ type stopChan struct {
 	wg        *sync.WaitGroup
 	closeOnce sync.Once
 	stopped   int32
+	rw        sync.RWMutex
 }
 
 func NewStopChan() StopChan {
@@ -27,6 +28,8 @@ func NewStopChan() StopChan {
 func (sc *stopChan) C() <-chan struct{} { return sc.ch }
 
 func (sc *stopChan) Add(c int) {
+	sc.rw.RLock()
+	defer sc.rw.RUnlock()
 	sc.wg.Add(c)
 }
 
@@ -41,6 +44,8 @@ func (sc *stopChan) Stop() bool {
 		atomic.StoreInt32(&sc.stopped, 1)
 		stopThisTime = true
 	})
+	sc.rw.Lock()
+	defer sc.rw.Unlock()
 	sc.wg.Wait()
 	return stopThisTime
 }

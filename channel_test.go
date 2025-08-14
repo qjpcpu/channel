@@ -69,6 +69,7 @@ func TestCap(t *testing.T) {
 	ch.SetCap(1)
 	mustEq(t, ch.Len(), 0)
 	ch.In() <- 1
+	time.Sleep(time.Millisecond)
 	mustEq(t, ch.Len(), 1)
 	select {
 	case ch.In() <- 2:
@@ -76,10 +77,12 @@ func TestCap(t *testing.T) {
 	case <-time.After(time.Second):
 	}
 	mustEq(t, ch.Cap(), 1)
+	time.Sleep(time.Millisecond)
 	mustEq(t, ch.Len(), 1)
 	ch.SetCap(2)
 	ch.In() <- 2
 	mustEq(t, ch.Cap(), 2)
+	time.Sleep(time.Millisecond)
 	mustEq(t, ch.Len(), 2)
 	ch.SetCap(0)
 	for i := 0; i < 10; i++ {
@@ -154,4 +157,13 @@ func TestHaltNow(t *testing.T) {
 		t.Fatal("should halt right now")
 	}
 
+}
+
+func TestStopRace(t *testing.T) {
+	s := NewStopChan()
+	go func() {
+		s.Add(1)
+		s.Done()
+	}()
+	s.Stop()
 }
