@@ -6,16 +6,35 @@ import (
 )
 
 type Channel[T any] interface {
+	// In returns the write-only input channel.
+	// Use this to send values into the dynamic channel.
 	In() chan<- T
+	// Out returns the read-only output channel.
+	// Use this to receive values from the dynamic channel.
 	Out() <-chan T
+	// Len returns the current number of items buffered in the channel.
+	// This is the total of items in the internal buffer plus any item
+	// currently held by the transport goroutine.
 	Len() int64
+	// Cap returns the current capacity of the channel.
+	// A value of 0 or less means the channel is effectively unbounded.
 	Cap() int64
+	// SetCap sets a "soft" capacity on the channel. When Len() >= Cap(),
+	// the channel applies backpressure, blocking new sends to In() until
+	// items are consumed from Out(). Setting a capacity of 0 or less removes
+	// the limit. This method is chainable.
 	SetCap(int64) Channel[T]
-	/* return when input closed && all data sent to output channel */
+	// Done returns a channel that is closed when the dynamic channel is fully
+	// drained and shut down. This occurs after Close() is called and all
+	// buffered items have been sent to the Out() channel.
 	Done() <-chan struct{}
-	/* close input */
+	// Close initiates a graceful shutdown. It closes the In() channel,
+	// preventing new items from being sent. The channel will continue to
+	// process and send all currently buffered items to Out() until it is empty.
 	Close()
-	/* close channel and drop data */
+	// Shutdown initiates an immediate, non-graceful shutdown. It closes the
+	// In() channel, stops all processing, and discards any items currently
+	// in the buffer. The Out() channel is also closed.
 	Shutdown()
 }
 
@@ -86,22 +105,30 @@ func (ch *channel[T]) Shutdown() {
 	}
 }
 
+func (ch *channel[T]) getAirCount() int64 {
+	return atomic.LoadInt64(&ch.airCount)
+}
+
+func (ch *channel[T]) setAirCount(v int64) {
+	atomic.StoreInt64(&ch.airCount, v)
+}
+
 func (ch *channel[T]) transport() {
 	var elem T
 	for {
-		if ch.get_airCount() == 0 {
+		if ch.getAirCount() == 0 {
 			var ok bool
 			if elem, ok = ch.list.pop(); ok {
 				atomic.AddInt64(&ch.listCount, -1)
-				ch.set_airCount(1)
+				ch.setAirCount(1)
 			}
 		}
 		if !ch.inputClosed {
 			ch.transport_when_input(elem)
 		} else {
-			if ch.get_airCount() == 1 {
+			if ch.getAirCount() == 1 {
 				ch.transport_when_no_input(elem)
-				ch.set_airCount(0)
+				ch.setAirCount(0)
 			} else {
 				/* well, all data sent done */
 				close(ch.out)
@@ -114,21 +141,21 @@ func (ch *channel[T]) transport() {
 }
 
 func (ch *channel[T]) transport_when_input(elem T) {
-	if capacity := ch.get_cap(); capacity > 0 && ch.Len() >= capacity {
-		if ch.get_airCount() == 0 {
+	if capacity := ch.Cap(); capacity > 0 && ch.Len() >= capacity {
+		if ch.getAirCount() == 0 {
 			panic("should not come here, buffer overflows but get nothing from buffer?")
 		}
 		select {
 		case ch.out <- elem:
-			ch.set_airCount(0)
+			ch.setAirCount(0)
 		case <-ch.signal:
 		}
 		return
 	}
-	if ch.get_airCount() == 1 {
+	if ch.getAirCount() == 1 {
 		select {
 		case ch.out <- elem:
-			ch.set_airCount(0)
+			ch.setAirCount(0)
 			return
 		case val, ok := <-ch.in:
 			if ok {
@@ -152,20 +179,4 @@ func (ch *channel[T]) transport_when_input(elem T) {
 
 func (ch *channel[T]) transport_when_no_input(elem T) {
 	ch.out <- elem
-}
-
-func (ch *channel[T]) get_airCount() int64 {
-	return atomic.LoadInt64(&ch.airCount)
-}
-
-func (ch *channel[T]) set_airCount(c int64) {
-	atomic.StoreInt64(&ch.airCount, c)
-}
-
-func (ch *channel[T]) get_cap() int64 {
-	return atomic.LoadInt64(&ch.capacity)
-}
-
-func (ch *channel[T]) set_cap(c int64) {
-	atomic.StoreInt64(&ch.capacity, c)
 }

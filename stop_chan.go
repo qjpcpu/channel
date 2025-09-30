@@ -38,16 +38,18 @@ func (sc *stopChan) Done() {
 }
 
 func (sc *stopChan) Stop() bool {
-	var stopThisTime bool
+	// Try to set stopped from 0 to 1. If successful, this is the first call.
+	firstCall := atomic.CompareAndSwapInt32(&sc.stopped, 0, 1)
+
 	sc.closeOnce.Do(func() {
 		close(sc.ch)
-		atomic.StoreInt32(&sc.stopped, 1)
-		stopThisTime = true
 	})
-	sc.rw.Lock()
-	defer sc.rw.Unlock()
+
+	sc.rw.Lock()         // Wait for any running Add calls to complete
+	defer sc.rw.Unlock() // Block new Add calls until Wait is done
+
 	sc.wg.Wait()
-	return stopThisTime
+	return firstCall
 }
 
 func (sc *stopChan) IsStopped() bool { return atomic.LoadInt32(&sc.stopped) == 1 }
